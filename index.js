@@ -10,18 +10,27 @@ client.on('ready', () => {
     console.log(`Logged in as ${client.user.tag}!`);
 });
 
+function timeoutFetch(url, options, timeout = 1000) {
+    return Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), timeout)
+        )
+    ]);
+}
+
 let joke = false;
 
 async function getResponse(data) {
-    if (data.entities.greetings) {
+    if (data.entities.greetings && data.entities.greetings[0].confidence > 0.8) {
         if (data.entities.greetings[0].value) {
             return "Hi. Where are you from?"
         }
     }
-    if (data.entities.bye) {
+    if (data.entities.bye && data.entities.bye[0].confidence > 0.8) {
         return "I hope you'll come back quickly\nBye"
     }
-    if (data.entities.location) {
+    if (data.entities.location && data.entities.location[0].confidence > 0.8) {
         const location = data.entities.location[0].resolved.values[0]
         const type = (() => {
             switch (location.grain) {
@@ -41,20 +50,20 @@ async function getResponse(data) {
         const parameters = (await (await fetch('https://api.openaq.org/v1/parameters')).json()).results
         const result = []
         for (const param of parameters) {
-            const url = `https://api.openaq.org/v1/measurements?${type}=${name}&limit=1&parameter=${param.id}`
-            console.log(url)
-            const response = await fetch(url);
-            console.log(response)
-            const airQualityData = await response.json()
-            if (airQualityData.results.length > 0) {
-                result.push({ name: param.name, value: airQualityData.results[0].value, unit: airQualityData.results[0].unit })
-            }
+            try {
+                const url = `https://api.openaq.org/v1/measurements?${type}=${name}&limit=1&parameter=${param.id}`
+                const response = await timeoutFetch(url, null);
+                const airQualityData = await response.json()
+                if (airQualityData.results.length > 0) {
+                    result.push({ name: param.name, value: airQualityData.results[0].value, unit: airQualityData.results[0].unit })
+                }
+            } catch (e) { }
         }
         if (result.length == 0) {
             return "I couldn't find air quality for your location :'("
         }
         console.log(result)
-        return `I found air quality params in your locations:\n${result.map(x=>`${x.name}: ${x.value} ${x.unit}`).join('\n')}`
+        return `I found air quality params in your locations:\n${result.map(x => `${x.name}: ${x.value} ${x.unit}`).join('\n')}`
     }
     if (data.entities.intent) {
         if (data.entities.intent[0].value === "name") {
